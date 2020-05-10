@@ -107,6 +107,28 @@ class InferenceConfig(CamusConfig):
     IMAGES_PER_GPU = 1
 
 
+def eval_detection(gt_mask, r):
+    ids = np.unique(r['class_ids'])
+    merged_masks = {}
+    qualities = dict([(1,0), (2,0), (3,0)])
+
+    for i in ids:
+        merged_masks[i] = (np.zeros_like(r['masks'][:,:,0]) > 0)
+        n_masks = r['masks'].shape[-1]
+        for c in range(n_masks):
+            if i != r['class_ids'][c] or r['scores'][c] < .7:
+                continue
+
+            mask = r['masks'][:,:,c]
+            merged_masks[i] |= mask
+
+        gt_mask_i = (gt_mask[:,:,i-1] > 0)
+        intersection = gt_mask_i & merged_masks[i]
+        union = gt_mask_i | merged_masks[i]
+        qualities[i] = np.sum(intersection) / np.sum(union)
+    
+    return qualities, merged_masks
+
 
 def fix_resolution(image, side=128):
     """Adjust image resolution to a square shape without distortion"""
