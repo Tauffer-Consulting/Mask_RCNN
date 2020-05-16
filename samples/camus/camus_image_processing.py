@@ -40,7 +40,7 @@ class CamusConfig(Config):
     IMAGES_PER_GPU = 4
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 3  # background + 3 heart structures
+    NUM_CLASSES = 1 + 1  # background + 3 heart structures
 
     # Use small images for faster training. Set the limits of the small side
     # the large side, and that determines the image shape.
@@ -68,9 +68,10 @@ class CamusDataset(utils.Dataset):
     def load_camus(self, patients_path, height, width):
         """Loads an image from a file and adds to dataset."""
         # Add classes
-        self.add_class("camus", 1, "ventricule")
-        self.add_class("camus", 2, "muscle")
-        self.add_class("camus", 3, "atrium")
+        self.add_class("camus", 1, "chamber")
+#         self.add_class("camus", 1, "ventricule")
+#         self.add_class("camus", 2, "muscle")
+#         self.add_class("camus", 3, "atrium")
     
         i = 0
         patients_dir = glob(patients_path)
@@ -87,16 +88,19 @@ class CamusDataset(utils.Dataset):
     def load_mask(self, image_id):
         """Generate instance masks for shapes of the given image ID."""
         info = self.image_info[image_id]
-        mask_image_path = info['path'].replace("_resized.png", "_gt_resized.png")
+        mask_image_path = info['path'].replace("_resized.png", "_gt_chambers_resized.png")
         mask = cv2.imread(mask_image_path)
+        mask = np.max(mask, axis=2).reshape((128,128,1))
         # If grayscale. Convert to RGB for consistency.
-        if mask.ndim != 3:
-            mask = skimage.color.gray2rgb(image)
+        #if mask.ndim != 3:
+        #    mask = skimage.color.gray2rgb(image)
         # If has an alpha channel, remove it for consistency
         if mask.shape[-1] == 4:
             mask = mask[..., :3]
         
-        return mask, np.array([1, 2, 3])
+        return mask,\
+               np.array([1,])
+              #np.array([1, 2, 3])
 
     def __len__(self):
         """Return the number of read images"""
@@ -108,6 +112,7 @@ class InferenceConfig(CamusConfig):
 
 
 def eval_detection(gt_mask, r):
+    """Apply the IoU metric to compare the ground truth and the detections"""
     ids = np.unique(r['class_ids'])
     merged_masks = {}
     qualities = dict([(1,0), (2,0), (3,0)])
