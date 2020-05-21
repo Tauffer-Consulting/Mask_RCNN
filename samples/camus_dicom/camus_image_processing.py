@@ -1,11 +1,18 @@
 import os
 import sys
 
+import json
 from glob import glob
 from tqdm import tqdm
 
 import cv2
 import numpy as np
+
+CURR_FILE_PATH= os.path.realpath(__file__)
+JSON_PATH = CURR_FILE_PATH.replace("camus_image_processing.py", "config.json")
+
+with open(JSON_PATH, 'r') as config_json:
+    CONFIG_PARAMETERS = json.load(config_json)
 
 # Root directory of the project
 ROOT_DIR = os.path.abspath("../../")
@@ -40,24 +47,26 @@ class CamusConfig(Config):
     IMAGES_PER_GPU = 4
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 1  # background + 3 heart structures
+    NUM_CLASSES = 1 + int(CONFIG_PARAMETERS["NUM_CLASSES"])  # background + additional classes
 
     # Use small images for faster training. Set the limits of the small side
     # the large side, and that determines the image shape.
-    IMAGE_MIN_DIM = 128
-    IMAGE_MAX_DIM = 128
+    IMAGE_MIN_DIM = int(CONFIG_PARAMETERS["IMAGE_MIN_DIM"])
+    IMAGE_MAX_DIM = int(CONFIG_PARAMETERS["IMAGE_MAX_DIM"])
 
     # Use smaller anchors because our image and objects are small
-    RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels
+    RPN_ANCHOR_SCALES = eval(CONFIG_PARAMETERS["RPN_ANCHOR_SCALES"])  # anchor side in pixels
 
     # Reduce training ROIs per image because we have few objects (3) in the images 
     TRAIN_ROIS_PER_IMAGE = 32
+    
+    NUM_EPOCHS = int(CONFIG_PARAMETERS["NUM_EPOCHS"])
 
     # Use a small epoch (<100) or medium (<300)
-    STEPS_PER_EPOCH = 100
+    STEPS_PER_EPOCH = int(CONFIG_PARAMETERS["STEPS_PER_EPOCH"])
 
     # use small validation steps since the epoch is small
-    VALIDATION_STEPS = 5
+    VALIDATION_STEPS = int(CONFIG_PARAMETERS["VALIDATION_STEPS"])
 
 class CamusDataset(utils.Dataset):
     """
@@ -65,6 +74,15 @@ class CamusDataset(utils.Dataset):
     echocardiograms exams.
     """
 
+    def prepare_data(self, patients_path, images_subdir="images/", masks_subdir="masks/",
+                     height=128, width=128):
+        images_path = os.path.join(patients_path, images_subdir)
+        masks_path = os.path.join(patients_path, masks_subdir)
+        images_filenames = sorted(glob(images_path + '*'))
+        masks_filenames = sorted(glob(masks_path + '*'))
+        
+        assert len(images_filenames) == len(masks_filenames), f"There are {len(images_filenames)} images and {len(masks_filenames)} masks"
+    
     def load_camus(self, patients_path, height, width):
         """Loads an image from a file and adds to dataset."""
         # Add classes
@@ -74,13 +92,13 @@ class CamusDataset(utils.Dataset):
         if isinstance(patients_path, str):
             patients_dir = glob(patients_path)
             for patient_path in tqdm(patients_dir, ncols=80):
-                filenames = glob(patient_path + "*_resized.png")
+                filenames = glob(patient_path + "*.jpg")
                 for image_filename in filenames:
                     self.add_image("camus", image_id=i, path=image_filename,
                                    width=width, height=height)
                     i += 1
         elif isinstance(patients_path, list):
-            filenames = [p for p in patients_path if p.endswith("_resized.png")]
+            filenames = [p for p in patients_path if p.endswith(".jpg")]
             for image_filename in filenames:
                 self.add_image("camus", image_id=i, path=image_filename,
                                width=width, height=height)
@@ -89,9 +107,9 @@ class CamusDataset(utils.Dataset):
     def load_mask(self, image_id):
         """Generate instance masks for shapes of the given image ID."""
         info = self.image_info[image_id]
-        mask_image_path = info['path'].replace("/images", "/masks")
+        mask_image_path = info['path'].replace("images", "masks")
         mask = cv2.imread(mask_image_path)
-        mask = np.max(mask, axis=2).reshape((128,128,1))
+        mask = (np.max(mask, axis=2) if len(mask.shape) > 2 else mask).reshape((128,128,1))
         
         return mask, np.array([1,])
 
@@ -134,7 +152,7 @@ def fix_resolution(image, side=128):
     
     fixed_image = cv2.resize(image, None, fx=f, fy=f, interpolation=cv2.INTER_NEAREST)
     
-    result_image = np.zeros((side, side))
+    result_image = np.zeros((side, side) + image.shape[2:])
     
     h, l = fixed_image.shape[:2]
     result_image[:h,:l] = fixed_image
